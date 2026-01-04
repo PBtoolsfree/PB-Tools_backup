@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Tool } from '../../types';
+import { Tool } from '../../types.ts';
 
 interface CalculatorToolsProps {
   tool: Tool;

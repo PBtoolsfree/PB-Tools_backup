@@ -1,16 +1,16 @@
 import React, { useState, useMemo } from 'react';
-import Header from './components/Header';
-import Footer from './components/Footer';
-import Hero from './components/Hero';
-import ToolCard from './components/ToolCard';
-import ImageToText from './components/tools/ImageToText';
-import CodeToHtml from './components/tools/CodeToHtml';
-import TextTools from './components/tools/TextTools';
-import CalculatorTools from './components/tools/CalculatorTools';
-import GeneratorTools from './components/tools/GeneratorTools';
-import ImageTools from './components/tools/ImageTools';
-import { TOOLS_DATA } from './constants';
-import { Tool } from './types';
+import Header from './components/Header.tsx';
+import Footer from './components/Footer.tsx';
+import Hero from './components/Hero.tsx';
+import ToolCard from './components/ToolCard.tsx';
+import ImageToText from './components/tools/ImageToText.tsx';
+import CodeToHtml from './components/tools/CodeToHtml.tsx';
+import TextTools from './components/tools/TextTools.tsx';
+import CalculatorTools from './components/tools/CalculatorTools.tsx';
+import GeneratorTools from './components/tools/GeneratorTools.tsx';
+import ImageTools from './components/tools/ImageTools.tsx';
+import { TOOLS_DATA } from './constants.ts';
+import { Tool } from './types.ts';
 
 const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');

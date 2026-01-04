@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Tool } from '../../types';
+import { Tool } from '../../types.ts';
 
 interface ImageToolsProps {
   tool: Tool;

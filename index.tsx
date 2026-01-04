@@ -2,6 +2,10 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
 import { GoogleGenAI } from "@google/genai";
 
+// Declare global libraries added via CDN
+declare var PDFLib: any;
+declare var download: any;
+
 // --- TYPES ---
 interface Tool {
   id: string;
@@ -41,12 +45,12 @@ const TOOLS_DATA: Category[] = [
     description: 'Manage PDFs and Documents efficiently.',
     iconClass: 'fas fa-file-pdf',
     tools: [
-      { id: 'doc-p2w', name: 'PDF to Word', description: 'Convert PDF files to editable Word documents.', iconClass: 'fas fa-file-word' },
-      { id: 'doc-w2p', name: 'Word to PDF', description: 'Convert DOC/DOCX files to PDF format.', iconClass: 'fas fa-file-pdf' },
-      { id: 'doc-comp', name: 'PDF Compressor', description: 'Shrink PDF file sizes for easy sharing.', iconClass: 'fas fa-compress' },
-      { id: 'doc-mrg', name: 'PDF Merger & Splitter', description: 'Combine multiple PDFs or split one into pages.', iconClass: 'fas fa-object-group' },
-      { id: 'doc-lock', name: 'PDF Lock/Unlock', description: 'Add or remove password protection from PDFs.', iconClass: 'fas fa-lock' },
-      { id: 'doc-sign', name: 'eSign PDF', description: 'Add your digital signature to documents.', iconClass: 'fas fa-signature' },
+      { id: 'doc-p2w', name: 'PDF to Word (AI)', description: 'Extract text from PDF files using AI.', iconClass: 'fas fa-file-word' },
+      { id: 'doc-w2p', name: 'Word to PDF', description: 'Convert text/content to PDF format.', iconClass: 'fas fa-file-pdf' },
+      { id: 'doc-mrg', name: 'PDF Merger', description: 'Combine multiple PDF files into one.', iconClass: 'fas fa-object-group' },
+      { id: 'doc-lock', name: 'PDF Lock', description: 'Add password protection to your PDF.', iconClass: 'fas fa-lock' },
+      { id: 'doc-comp', name: 'PDF Compressor', description: 'Shrink PDF file sizes (Simulated).', iconClass: 'fas fa-compress' },
+      { id: 'doc-sign', name: 'eSign Generator', description: 'Create digital signatures.', iconClass: 'fas fa-signature' },
     ]
   },
   {
@@ -757,6 +761,192 @@ const GeneratorTools: React.FC<{ tool: Tool }> = ({ tool }) => {
     )
 }
 
+const DocumentTools: React.FC<{ tool: Tool }> = ({ tool }) => {
+    const [file, setFile] = useState<File|null>(null);
+    const [file2, setFile2] = useState<File|null>(null); // For merge
+    const [textInput, setTextInput] = useState(''); // For Word to PDF
+    const [password, setPassword] = useState(''); // For Lock
+    const [isLoading, setIsLoading] = useState(false);
+    const [status, setStatus] = useState('');
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const [isDrawing, setIsDrawing] = useState(false);
+
+    useEffect(() => {
+        setFile(null); setFile2(null); setTextInput(''); setPassword(''); setStatus('');
+    }, [tool.id]);
+
+    // -- Handlers --
+
+    const handlePdfToWord = async () => {
+        if(!file) return;
+        setIsLoading(true);
+        setStatus("Processing with AI... This may take a moment.");
+        try {
+             const base64Data = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve((reader.result as string).split(',')[1]);
+                reader.readAsDataURL(file);
+             });
+
+             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+             // Check if model supports PDF or just text extraction
+             const response = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: {
+                  parts: [
+                    { inlineData: { mimeType: 'application/pdf', data: base64Data } },
+                    { text: "Extract all text from this PDF document. Return only the raw text content." }
+                  ]
+                }
+             });
+             
+             const text = response.text;
+             if(text) {
+                 download(text, "extracted_text.txt", "text/plain");
+                 setStatus("Success! Text file downloaded.");
+             } else {
+                 setStatus("Failed to extract text.");
+             }
+        } catch(e) { console.error(e); setStatus("Error: " + (e as Error).message); }
+        finally { setIsLoading(false); }
+    };
+
+    const handleWordToPdf = async () => {
+        if(!textInput) return;
+        setIsLoading(true);
+        try {
+            const pdfDoc = await PDFLib.PDFDocument.create();
+            const page = pdfDoc.addPage();
+            const { width, height } = page.getSize();
+            const fontSize = 12;
+            page.drawText(textInput, { x: 50, y: height - 4 * fontSize, size: fontSize, maxWidth: width - 100 });
+            const pdfBytes = await pdfDoc.save();
+            download(pdfBytes, "document.pdf", "application/pdf");
+            setStatus("PDF Created successfully!");
+        } catch(e) { setStatus("Error creating PDF"); }
+        finally { setIsLoading(false); }
+    };
+
+    const handleMerge = async () => {
+        if(!file || !file2) return;
+        setIsLoading(true);
+        try {
+            const pdfDoc = await PDFLib.PDFDocument.create();
+            const [b1, b2] = await Promise.all([file.arrayBuffer(), file2.arrayBuffer()]);
+            const d1 = await PDFLib.PDFDocument.load(b1);
+            const d2 = await PDFLib.PDFDocument.load(b2);
+            
+            const p1 = await pdfDoc.copyPages(d1, d1.getPageIndices());
+            p1.forEach((p:any) => pdfDoc.addPage(p));
+            const p2 = await pdfDoc.copyPages(d2, d2.getPageIndices());
+            p2.forEach((p:any) => pdfDoc.addPage(p));
+            
+            const bytes = await pdfDoc.save();
+            download(bytes, "merged.pdf", "application/pdf");
+            setStatus("Merged successfully!");
+        } catch(e) { setStatus("Error merging PDFs. Ensure valid PDF files."); }
+        finally { setIsLoading(false); }
+    }
+
+    const handleLock = async () => {
+        if(!file || !password) return;
+        setIsLoading(true);
+        try {
+            const bytes = await file.arrayBuffer();
+            const pdfDoc = await PDFLib.PDFDocument.load(bytes);
+            pdfDoc.encrypt({ userPassword: password, ownerPassword: password });
+            const saved = await pdfDoc.save();
+            download(saved, "protected.pdf", "application/pdf");
+            setStatus("PDF Locked & Downloaded.");
+        } catch(e) { setStatus("Error processing PDF."); }
+        finally { setIsLoading(false); }
+    }
+
+    // Canvas Signature Logic
+    const startDraw = (e: any) => {
+        const ctx = canvasRef.current?.getContext('2d');
+        if(!ctx) return;
+        setIsDrawing(true);
+        const rect = canvasRef.current!.getBoundingClientRect();
+        const x = (e.clientX || e.touches[0].clientX) - rect.left;
+        const y = (e.clientY || e.touches[0].clientY) - rect.top;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+    }
+    const draw = (e: any) => {
+        if(!isDrawing || !canvasRef.current) return;
+        const ctx = canvasRef.current.getContext('2d');
+        const rect = canvasRef.current.getBoundingClientRect();
+        const x = (e.clientX || e.touches[0].clientX) - rect.left;
+        const y = (e.clientY || e.touches[0].clientY) - rect.top;
+        if(ctx) { ctx.lineTo(x, y); ctx.stroke(); }
+    }
+    const endDraw = () => setIsDrawing(false);
+    const clearSig = () => {
+        const ctx = canvasRef.current?.getContext('2d');
+        if(ctx && canvasRef.current) ctx.clearRect(0,0,canvasRef.current.width, canvasRef.current.height);
+    }
+    const saveSig = () => {
+         if(canvasRef.current) {
+             const url = canvasRef.current.toDataURL("image/png");
+             download(url, "signature.png", "image/png");
+         }
+    }
+
+    return (
+        <div className="w-full max-w-2xl mx-auto mt-8 text-center">
+            {/* File Inputs */}
+            {['doc-p2w', 'doc-mrg', 'doc-lock', 'doc-comp'].includes(tool.id) && (
+                <div className="mb-6">
+                    <label className="block mb-2 font-semibold">Upload PDF</label>
+                    <input type="file" accept=".pdf" onChange={e => setFile(e.target.files?.[0] || null)} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+                </div>
+            )}
+            
+            {tool.id === 'doc-mrg' && (
+                <div className="mb-6">
+                    <label className="block mb-2 font-semibold">Upload Second PDF</label>
+                    <input type="file" accept=".pdf" onChange={e => setFile2(e.target.files?.[0] || null)} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+                </div>
+            )}
+
+            {tool.id === 'doc-w2p' && (
+                <textarea value={textInput} onChange={e => setTextInput(e.target.value)} className="w-full h-64 p-4 border rounded-lg mb-4" placeholder="Type your document content here..."></textarea>
+            )}
+
+            {tool.id === 'doc-lock' && (
+                <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="p-3 border rounded w-full mb-4" placeholder="Enter Password to Lock"/>
+            )}
+
+            {tool.id === 'doc-sign' && (
+                <div className="mb-4">
+                    <canvas 
+                        ref={canvasRef} 
+                        width={500} 
+                        height={200} 
+                        className="border-2 border-dashed border-slate-300 rounded bg-white cursor-crosshair touch-none"
+                        onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
+                        onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
+                    ></canvas>
+                    <div className="flex gap-4 justify-center mt-2">
+                        <button onClick={clearSig} className="px-4 py-2 bg-slate-200 rounded">Clear</button>
+                        <button onClick={saveSig} className="px-4 py-2 bg-primary text-white rounded">Download Signature</button>
+                    </div>
+                </div>
+            )}
+
+            {/* Action Buttons */}
+            {tool.id === 'doc-p2w' && <button onClick={handlePdfToWord} disabled={isLoading || !file} className="btn-primary px-8 py-3 bg-primary text-white rounded-full">{isLoading ? 'Extracting...' : 'Extract Text from PDF'}</button>}
+            {tool.id === 'doc-w2p' && <button onClick={handleWordToPdf} disabled={isLoading || !textInput} className="btn-primary px-8 py-3 bg-primary text-white rounded-full">Convert to PDF</button>}
+            {tool.id === 'doc-mrg' && <button onClick={handleMerge} disabled={isLoading || !file || !file2} className="btn-primary px-8 py-3 bg-primary text-white rounded-full">Merge PDFs</button>}
+            {tool.id === 'doc-lock' && <button onClick={handleLock} disabled={isLoading || !file || !password} className="btn-primary px-8 py-3 bg-primary text-white rounded-full">Lock PDF</button>}
+            {tool.id === 'doc-comp' && file && <button onClick={() => { download(file, "compressed_" + file.name, "application/pdf"); setStatus("File processed (Simulated compression)"); }} className="btn-primary px-8 py-3 bg-primary text-white rounded-full">Compress PDF</button>}
+
+            {status && <div className="mt-6 p-4 bg-slate-100 rounded text-secondary font-medium">{status}</div>}
+        </div>
+    )
+}
+
 // --- MAIN APP ---
 
 const App: React.FC = () => {
@@ -782,6 +972,7 @@ const App: React.FC = () => {
       if (['txt-case', 'txt-count', 'txt-dup', 'txt-sort', 'web-json', 'web-min', 'web-b64', 'web-url'].includes(activeTool.id)) return <TextTools tool={activeTool} />;
       if (['calc-bmi', 'calc-age', 'calc-emi', 'calc-gst', 'calc-sci'].includes(activeTool.id)) return <CalculatorTools tool={activeTool} />;
       if (['util-uuid', 'util-rand', 'col-hex', 'col-grad'].includes(activeTool.id)) return <GeneratorTools tool={activeTool} />;
+      if (['doc-p2w', 'doc-w2p', 'doc-mrg', 'doc-lock', 'doc-comp', 'doc-sign'].includes(activeTool.id)) return <DocumentTools tool={activeTool} />;
 
       return (
         <div className="p-12 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 inline-block max-w-lg mx-auto">

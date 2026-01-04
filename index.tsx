@@ -77,7 +77,7 @@ const TOOLS_DATA: Category[] = [
       { id: 'txt-count', name: 'Word & Char Counter', description: 'Count words, characters, and sentences.', iconClass: 'fas fa-list-ol' },
       { id: 'txt-dup', name: 'Remove Duplicate Lines', description: 'Clean up lists by removing repeats.', iconClass: 'fas fa-remove-format' },
       { id: 'txt-sort', name: 'Text Sorter', description: 'Sort text alphabetically or numerically.', iconClass: 'fas fa-sort-alpha-down' },
-      { id: 'txt-enc', name: 'Text Encryptor', description: 'Encrypt and decrypt text securely.', iconClass: 'fas fa-user-secret' },
+      { id: 'txt-enc', name: 'Text Encryptor', description: 'Encrypt (ROT13) and decrypt text.', iconClass: 'fas fa-user-secret' },
     ]
   },
   {
@@ -101,7 +101,7 @@ const TOOLS_DATA: Category[] = [
     tools: [
       { id: 'col-pick', name: 'Color Picker from Image', description: 'Get the HEX code from any image.', iconClass: 'fas fa-eye-dropper' },
       { id: 'col-hex', name: 'HEX to RGB Converter', description: 'Convert color formats instantly.', iconClass: 'fas fa-swatchbook' },
-      { id: 'col-cont', name: 'Contrast Checker', description: 'Ensure web accessibility compliance.', iconClass: 'fas fa-adjust' },
+      { id: 'col-cont', name: 'Contrast Checker', description: 'Check WCAG contrast ratios.', iconClass: 'fas fa-adjust' },
       { id: 'col-grad', name: 'Gradient Generator', description: 'Create CSS backgrounds effortlessly.', iconClass: 'fas fa-rainbow' },
     ]
   },
@@ -112,7 +112,7 @@ const TOOLS_DATA: Category[] = [
     iconClass: 'fas fa-search-dollar',
     tools: [
       { id: 'seo-kw', name: 'Keyword Density', description: 'Check how often keywords appear.', iconClass: 'fas fa-key' },
-      { id: 'seo-meta', name: 'Meta Tag Analyzer', description: 'Analyze page meta titles and descriptions.', iconClass: 'fas fa-tags' },
+      { id: 'seo-meta', name: 'Meta Tag Analyzer', description: 'Analyze page meta titles and descriptions from HTML.', iconClass: 'fas fa-tags' },
     ]
   },
   {
@@ -124,11 +124,37 @@ const TOOLS_DATA: Category[] = [
       { id: 'util-qr', name: 'QR Code Generator', description: 'Create QR codes for links and text.', iconClass: 'fas fa-qrcode' },
       { id: 'util-bar', name: 'Barcode Generator', description: 'Generate barcodes for products.', iconClass: 'fas fa-barcode' },
       { id: 'util-uuid', name: 'UUID Generator', description: 'Generate unique identifiers (v4.', iconClass: 'fas fa-fingerprint' },
-      { id: 'util-unit', name: 'Unit Converter', description: 'Length, weight, temperature, and more.', iconClass: 'fas fa-balance-scale' },
+      { id: 'util-unit', name: 'Unit Converter', description: 'Length and Weight conversions.', iconClass: 'fas fa-balance-scale' },
       { id: 'util-rand', name: 'Random Generator', description: 'Generate random numbers or passwords.', iconClass: 'fas fa-dice' },
     ]
   },
 ];
+
+// --- HELPERS ---
+const rot13 = (str: string) => str.replace(/[a-zA-Z]/g, (char) => {
+    const base = char <= 'Z' ? 90 : 122;
+    const code = char.charCodeAt(0) + 13;
+    return String.fromCharCode(base >= code ? code : code - 26);
+});
+
+const getLuminance = (hex: string) => {
+    const rgb = parseInt(hex.slice(1), 16);
+    const r = (rgb >> 16) & 0xff;
+    const g = (rgb >>  8) & 0xff;
+    const b = (rgb >>  0) & 0xff;
+    const [rs, gs, bs] = [r, g, b].map(c => {
+        const v = c / 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+};
+
+const getContrastRatio = (h1: string, h2: string) => {
+    const l1 = getLuminance(h1);
+    const l2 = getLuminance(h2);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+};
+
 
 // --- SHARED COMPONENTS ---
 
@@ -309,34 +335,14 @@ const ImageToText: React.FC = () => {
 
   const downloadHtml = () => {
     if (!extractedText) return;
-
-    const safeText = extractedText
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-
-    const htmlContent = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Extracted Text</title>
-</head>
-<body>
-    <pre>${safeText}</pre>
-</body>
-</html>`;
-    
-    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const blob = new Blob([extractedText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'extracted-text.html';
+    a.download = 'extracted-text.txt';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -379,15 +385,7 @@ const ImageToText: React.FC = () => {
               : 'bg-primary hover:bg-primary-dark shadow-blue-500/30'
           }`}
         >
-          {isLoading ? (
-            <span className="flex items-center gap-2">
-              <i className="fas fa-spinner fa-spin"></i> Processing...
-            </span>
-          ) : (
-            <span className="flex items-center gap-2">
-              <i className="fas fa-magic"></i> Extract Text
-            </span>
-          )}
+          {isLoading ? 'Processing...' : 'Extract Text'}
         </button>
       </div>
 
@@ -399,30 +397,14 @@ const ImageToText: React.FC = () => {
 
       {extractedText && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="bg-slate-50 border-b border-slate-100 px-6 py-4 flex justify-between items-center flex-wrap gap-2">
+          <div className="bg-slate-50 border-b border-slate-100 px-6 py-4 flex justify-between items-center gap-2">
             <h3 className="font-semibold text-slate-700">Extracted Text</h3>
             <div className="flex gap-2">
-                <button 
-                  onClick={downloadHtml}
-                  className="text-primary hover:text-primary-dark text-sm font-medium flex items-center gap-2 px-3 py-1 rounded-md hover:bg-blue-100 transition-colors"
-                >
-                  <i className="fas fa-file-code"></i> Download HTML
-                </button>
-                <button 
-                  onClick={copyToClipboard}
-                  className="text-primary hover:text-primary-dark text-sm font-medium flex items-center gap-2 px-3 py-1 rounded-md hover:bg-blue-100 transition-colors"
-                >
-                  <i className="far fa-copy"></i> Copy
-                </button>
+                <button onClick={downloadHtml} className="text-primary hover:text-primary-dark text-sm font-medium"><i className="fas fa-download"></i> Download</button>
+                <button onClick={copyToClipboard} className="text-primary hover:text-primary-dark text-sm font-medium"><i className="far fa-copy"></i> Copy</button>
             </div>
           </div>
-          <div className="p-6">
-            <textarea 
-              readOnly 
-              value={extractedText}
-              className="w-full h-64 p-4 bg-slate-50 rounded-lg border-none resize-y focus:ring-0 focus:outline-none text-slate-700 font-mono text-sm leading-relaxed"
-            />
-          </div>
+          <textarea readOnly value={extractedText} className="w-full h-64 p-6 bg-slate-50 border-none resize-y focus:outline-none text-slate-700 font-mono text-sm" />
         </div>
       )}
     </div>
@@ -434,36 +416,19 @@ const CodeToHtml: React.FC = () => {
   const [outputHtml, setOutputHtml] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'source' | 'preview'>('source');
 
   const handleConvert = async () => {
     if (!inputCode.trim()) return;
-
     setIsLoading(true);
     setError(null);
-    setOutputHtml('');
-
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: `Convert the following text/code to clean, semantic HTML5. 
-        - If it is Markdown, convert it to valid HTML (h1, p, ul, etc.).
-        - If it is a code snippet (like JS, Python, CSS), wrap it in <pre><code> tags and escape HTML entities properly.
-        - Return ONLY the HTML code.
-        - Do not include <html>, <head>, or <body> tags, just the body content.
-        
-        Input:
-        ${inputCode}`
+        contents: `Convert the following text/code to clean, semantic HTML5 body content only. 
+        Input: ${inputCode}`
       });
-
-      const text = response.text;
-      if (text) {
-        const cleanedText = text.replace(/^```html\s*/, '').replace(/```\s*$/, '');
-        setOutputHtml(cleanedText);
-      } else {
-        setError("Could not generate HTML. Please try again.");
-      }
+      setOutputHtml(response.text?.replace(/^```html\s*/, '').replace(/```\s*$/, '') || '');
     } catch (err) {
       console.error(err);
       setError("An error occurred. Check API Key.");
@@ -472,91 +437,19 @@ const CodeToHtml: React.FC = () => {
     }
   };
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(outputHtml);
-  };
-
-  const downloadHtml = () => {
-    if (!outputHtml) return;
-    const fullHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Converted HTML</title>
-<style>
-  body { font-family: system-ui, sans-serif; line-height: 1.6; padding: 20px; max-width: 800px; margin: 0 auto; color: #333; }
-  pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
-</style>
-</head>
-<body>
-${outputHtml}
-</body>
-</html>`;
-
-    const blob = new Blob([fullHtml], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'converted.html';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-
   return (
-    <div className="w-full max-w-5xl mx-auto text-left mt-8">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="flex flex-col">
-          <label className="font-semibold text-slate-700 mb-2">Input (Markdown or Code)</label>
-          <textarea
-            value={inputCode}
-            onChange={(e) => setInputCode(e.target.value)}
-            placeholder="# Hello World&#10;&#10;Type some markdown or paste code here..."
-            className="w-full h-96 p-4 bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary outline-none font-mono text-sm resize-none"
-          />
-          <button
-            onClick={handleConvert}
-            disabled={!inputCode.trim() || isLoading}
-            className={`mt-4 w-full py-3 rounded-xl font-bold text-white shadow-md transition-all ${
-              !inputCode.trim() || isLoading
-                ? 'bg-slate-300 cursor-not-allowed'
-                : 'bg-primary hover:bg-primary-dark hover:-translate-y-0.5'
-            }`}
-          >
-            {isLoading ? 'Converting...' : 'Convert to HTML'}
-          </button>
+    <div className="w-full max-w-5xl mx-auto text-left mt-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div>
+          <label className="font-semibold text-slate-700 mb-2 block">Input</label>
+          <textarea value={inputCode} onChange={(e) => setInputCode(e.target.value)} className="w-full h-96 p-4 bg-slate-50 rounded-xl border border-slate-200 outline-none font-mono text-sm" placeholder="Markdown or Code..." />
+          <button onClick={handleConvert} disabled={isLoading} className="mt-4 w-full py-3 rounded-xl font-bold text-white bg-primary hover:bg-primary-dark transition-all">{isLoading ? 'Converting...' : 'Convert'}</button>
         </div>
-
-        <div className="flex flex-col">
-          <div className="flex justify-between items-end mb-2">
-            <label className="font-semibold text-slate-700">Output</label>
-            <div className="flex bg-slate-100 rounded-lg p-1">
-              <button onClick={() => setActiveTab('source')} className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${activeTab === 'source' ? 'bg-white text-primary shadow-sm' : 'text-slate-500'}`}>HTML Source</button>
-              <button onClick={() => setActiveTab('preview')} className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${activeTab === 'preview' ? 'bg-white text-primary shadow-sm' : 'text-slate-500'}`}>Preview</button>
-            </div>
-          </div>
-          
-          <div className="relative h-96 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-            {error ? (
-              <div className="flex items-center justify-center h-full text-red-500 p-4 text-center">{error}</div>
-            ) : outputHtml ? (
-              activeTab === 'source' ? (
-                <textarea readOnly value={outputHtml} className="w-full h-full p-4 bg-slate-50 font-mono text-sm text-slate-700 resize-none outline-none border-none" />
-              ) : (
-                <div className="w-full h-full p-4 overflow-auto prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: outputHtml }} />
-              )
-            ) : (
-              <div className="flex items-center justify-center h-full text-slate-400 p-8 text-center bg-slate-50/50">Converted HTML will appear here</div>
-            )}
-          </div>
-
-          <div className="flex gap-3 mt-4">
-             <button onClick={downloadHtml} disabled={!outputHtml} className={`flex-1 py-2 rounded-lg font-medium border transition-colors flex items-center justify-center gap-2 ${!outputHtml ? 'border-slate-200 text-slate-300 cursor-not-allowed' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}><i className="fas fa-download"></i> Download HTML</button>
-            <button onClick={copyToClipboard} disabled={!outputHtml} className={`flex-1 py-2 rounded-lg font-medium border transition-colors flex items-center justify-center gap-2 ${!outputHtml ? 'border-slate-200 text-slate-300 cursor-not-allowed' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}><i className="far fa-copy"></i> Copy Code</button>
+        <div>
+          <label className="font-semibold text-slate-700 mb-2 block">Output</label>
+          <div className="relative h-96 bg-white rounded-xl border border-slate-200 overflow-hidden">
+            {error ? <div className="p-4 text-red-500">{error}</div> : <textarea readOnly value={outputHtml} className="w-full h-full p-4 bg-slate-50 font-mono text-sm text-slate-700 outline-none border-none" />}
           </div>
         </div>
-      </div>
     </div>
   );
 };
@@ -565,116 +458,69 @@ const ImageTools: React.FC<{ tool: Tool }> = ({ tool }) => {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const [pickedColor, setPickedColor] = useState<string | null>(null);
-  
-  const [format, setFormat] = useState('image/jpeg');
-  const [quality, setQuality] = useState(80);
-  const [width, setWidth] = useState<number>(0);
-  const [height, setHeight] = useState<number>(0);
-  const [maintainAspect, setMaintainAspect] = useState(true);
   const [rotation, setRotation] = useState(0);
-  const [flipH, setFlipH] = useState(false);
-  const [flipV, setFlipV] = useState(false);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
 
-  useEffect(() => {
-    setFile(null); setPreviewUrl(null); setResultUrl(null); setPickedColor(null); setRotation(0); setFlipH(false); setFlipV(false);
-  }, [tool.id]);
+  useEffect(() => { setFile(null); setPreviewUrl(null); setResultUrl(null); setPickedColor(null); setRotation(0); }, [tool.id]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-        setFile(selectedFile);
-        const url = URL.createObjectURL(selectedFile);
-        setPreviewUrl(url);
-        const img = new Image();
-        img.src = url;
-        img.onload = () => { setWidth(img.naturalWidth); setHeight(img.naturalHeight); };
+    if (e.target.files?.[0]) {
+        setFile(e.target.files[0]);
+        setPreviewUrl(URL.createObjectURL(e.target.files[0]));
     }
   };
 
   const handleProcess = () => {
-    if (!previewUrl || !imgRef.current) return;
-    setIsLoading(true);
-    setTimeout(() => {
-        try {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            const img = imgRef.current;
-            if (!ctx || !img) return;
-
-            if (tool.id === 'img-rot') {
-                const rads = rotation * Math.PI / 180;
-                const s = Math.sin(rads);
-                if (Math.abs(s) > 0.9) { canvas.width = img.naturalHeight; canvas.height = img.naturalWidth; }
-                else { canvas.width = img.naturalWidth; canvas.height = img.naturalHeight; }
-                ctx.translate(canvas.width/2, canvas.height/2);
-                ctx.rotate(rads);
-                ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
-                if (Math.abs(s) > 0.9) ctx.drawImage(img, -img.naturalHeight/2, -img.naturalWidth/2);
-                else ctx.drawImage(img, -img.naturalWidth/2, -img.naturalHeight/2);
-                setResultUrl(canvas.toDataURL(file?.type));
-            } else if (tool.id === 'img-res') {
-                canvas.width = width; canvas.height = height;
-                ctx.drawImage(img, 0, 0, width, height);
-                setResultUrl(canvas.toDataURL(file?.type));
-            } else {
-                canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
-                if (format === 'image/jpeg') { ctx.fillStyle = '#fff'; ctx.fillRect(0,0,canvas.width,canvas.height); }
-                ctx.drawImage(img, 0, 0);
-                const q = tool.id === 'img-comp' ? quality / 100 : 0.92;
-                setResultUrl(canvas.toDataURL(format, q));
-            }
-        } catch(e) { console.error(e); } finally { setIsLoading(false); }
-    }, 100);
-  };
+      if(!imgRef.current) return;
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if(!ctx) return;
+      const img = imgRef.current;
+      
+      if(tool.id === 'img-rot') {
+           const rads = rotation * Math.PI / 180;
+           canvas.width = Math.abs(Math.cos(rads)*img.naturalWidth) + Math.abs(Math.sin(rads)*img.naturalHeight);
+           canvas.height = Math.abs(Math.sin(rads)*img.naturalWidth) + Math.abs(Math.cos(rads)*img.naturalHeight);
+           ctx.translate(canvas.width/2, canvas.height/2);
+           ctx.rotate(rads);
+           ctx.drawImage(img, -img.naturalWidth/2, -img.naturalHeight/2);
+      } else {
+           canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+           ctx.drawImage(img, 0, 0);
+      }
+      setResultUrl(canvas.toDataURL());
+  }
 
   const handleColorPick = (e: React.MouseEvent<HTMLImageElement>) => {
       if (tool.id !== 'col-pick' || !imgRef.current) return;
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      canvas.width = imgRef.current.naturalWidth;
-      canvas.height = imgRef.current.naturalHeight;
+      canvas.width = imgRef.current.naturalWidth; canvas.height = imgRef.current.naturalHeight;
       ctx.drawImage(imgRef.current, 0, 0);
       const rect = e.currentTarget.getBoundingClientRect();
       const x = (e.clientX - rect.left) * (canvas.width / rect.width);
       const y = (e.clientY - rect.top) * (canvas.height / rect.height);
       const p = ctx.getImageData(x, y, 1, 1).data;
-      const hex = "#" + ("000000" + ((p[0] << 16) | (p[1] << 8) | p[2]).toString(16)).slice(-6);
-      setPickedColor(hex);
+      setPickedColor("#" + ("000000" + ((p[0] << 16) | (p[1] << 8) | p[2]).toString(16)).slice(-6));
   };
 
   return (
     <div className="w-full max-w-4xl mx-auto text-left mt-8">
-      <div className="border-2 border-dashed border-blue-200 rounded-xl bg-blue-50/30 p-8 text-center cursor-pointer mb-8" onClick={() => fileInputRef.current?.click()}>
-        <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
-        {previewUrl ? <img ref={imgRef} src={previewUrl} className={`max-h-80 rounded-lg mx-auto ${tool.id === 'col-pick' ? 'cursor-crosshair' : ''}`} style={tool.id === 'img-rot' ? {transform: `rotate(${rotation}deg) scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})`} : {}} onClick={handleColorPick} /> : <div className="py-8"><i className="fas fa-cloud-upload-alt text-5xl text-blue-300 mb-4"></i><p>Click to upload image</p></div>}
+      <div className="border-2 border-dashed border-blue-200 rounded-xl bg-blue-50/30 p-8 text-center cursor-pointer mb-8 relative">
+        <input type="file" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleFileChange} accept="image/*" />
+        {previewUrl ? <img ref={imgRef} src={previewUrl} className="max-h-80 mx-auto" style={{transform: `rotate(${rotation}deg)`}} onClick={handleColorPick} /> : <div className="py-8"><i className="fas fa-cloud-upload-alt text-5xl text-blue-300"></i></div>}
       </div>
       
       {file && tool.id !== 'col-pick' && (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-8 flex flex-wrap gap-6 items-end">
-            {tool.id === 'img-conv' && <select value={format} onChange={e => setFormat(e.target.value)} className="p-2 border rounded"><option value="image/jpeg">JPG</option><option value="image/png">PNG</option><option value="image/webp">WEBP</option></select>}
-            {tool.id === 'img-comp' && <input type="range" min="1" max="100" value={quality} onChange={e => setQuality(parseInt(e.target.value))} className="w-48" />}
-            {tool.id === 'img-res' && <div className="flex gap-2"><input type="number" value={width} onChange={e => setWidth(parseInt(e.target.value))} className="border p-2 w-24" /><input type="number" value={height} onChange={e => setHeight(parseInt(e.target.value))} className="border p-2 w-24" /></div>}
-            {tool.id === 'img-rot' && <div className="flex gap-2"><button onClick={() => setRotation(r => r-90)} className="btn p-2 border"><i className="fas fa-undo"></i></button><button onClick={() => setRotation(r => r+90)} className="btn p-2 border"><i className="fas fa-redo"></i></button><button onClick={() => setFlipH(!flipH)} className="btn p-2 border">Flip H</button></div>}
-            <button onClick={handleProcess} className="px-6 py-2 bg-primary text-white rounded shadow">{isLoading ? 'Processing...' : 'Process'}</button>
+        <div className="flex gap-4 justify-center">
+            {tool.id === 'img-rot' && <button onClick={() => setRotation(r => r + 90)} className="btn bg-slate-200 px-4 py-2 rounded">Rotate 90°</button>}
+            <button onClick={handleProcess} className="btn bg-primary text-white px-6 py-2 rounded">Process</button>
         </div>
       )}
-
-      {tool.id === 'col-pick' && pickedColor && (
-          <div className="p-4 bg-slate-50 border rounded flex gap-4 items-center"><div className="w-12 h-12 rounded-full border" style={{background:pickedColor}}></div><span className="font-mono text-xl">{pickedColor}</span></div>
-      )}
-
-      {resultUrl && (
-          <div className="bg-green-50 p-8 text-center rounded-xl border border-green-200">
-              <img src={resultUrl} className="max-h-64 mx-auto mb-4 border" />
-              <a href={resultUrl} download="processed.png" className="px-8 py-3 bg-green-600 text-white rounded-full">Download</a>
-          </div>
-      )}
+      {pickedColor && <div className="text-center mt-4 text-2xl font-mono font-bold" style={{color: pickedColor}}>{pickedColor}</div>}
+      {resultUrl && <div className="text-center mt-8"><img src={resultUrl} className="max-h-64 mx-auto border" /><a href={resultUrl} download="processed.png" className="btn bg-green-600 text-white px-6 py-2 rounded inline-block mt-4">Download</a></div>}
     </div>
   );
 };
@@ -690,15 +536,17 @@ const TextTools: React.FC<{ tool: Tool }> = ({ tool }) => {
         if(tool.id === 'txt-sort') setOutput(input.split('\n').sort().join('\n'));
         if(tool.id === 'web-json') try { setOutput(JSON.stringify(JSON.parse(input), null, 2)); } catch { setOutput('Invalid JSON'); }
         if(tool.id === 'web-min') setOutput(input.replace(/\s+/g, ' ').trim());
+        if(tool.id === 'txt-enc') setOutput(rot13(input));
     }
 
     return (
         <div className="w-full max-w-4xl mx-auto text-left mt-8">
             <textarea value={input} onChange={e => setInput(e.target.value)} className="w-full h-48 p-4 border rounded mb-4" placeholder="Input text..." />
-            <div className="mb-6 flex gap-2">
+            <div className="mb-6 flex gap-2 flex-wrap">
                 {tool.id === 'txt-case' && ['upper','lower','title'].map(m => <button key={m} onClick={() => setOutput(m === 'upper' ? input.toUpperCase() : m === 'lower' ? input.toLowerCase() : input.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()))} className="px-4 py-2 bg-slate-200 rounded capitalize">{m}</button>)}
                 {tool.id === 'web-b64' && <><button onClick={() => setOutput(btoa(input))} className="btn bg-primary text-white px-4 py-2 rounded">Encode</button><button onClick={() => setOutput(atob(input))} className="btn bg-slate-600 text-white px-4 py-2 rounded">Decode</button></>}
-                {['txt-dup','txt-sort','web-json','web-min'].includes(tool.id) && <button onClick={process} className="btn bg-primary text-white px-6 py-2 rounded">Process</button>}
+                {['txt-dup','txt-sort','web-json','web-min','txt-enc'].includes(tool.id) && <button onClick={process} className="btn bg-primary text-white px-6 py-2 rounded">Process</button>}
+                {tool.id === 'web-url' && <><button onClick={() => setOutput(encodeURIComponent(input))} className="btn bg-primary text-white px-4 py-2 rounded">Encode</button><button onClick={() => setOutput(decodeURIComponent(input))} className="btn bg-slate-600 text-white px-4 py-2 rounded">Decode</button></>}
             </div>
             <textarea readOnly value={output} className="w-full h-48 p-4 bg-slate-50 border rounded" />
         </div>
@@ -711,196 +559,155 @@ const CalculatorTools: React.FC<{ tool: Tool }> = ({ tool }) => {
     const [v3, setV3] = useState('');
     const [res, setRes] = useState<string|null>(null);
     const [loading, setLoading] = useState(false);
-
-    // Currency state
     const [currFrom, setCurrFrom] = useState('USD');
     const [currTo, setCurrTo] = useState('EUR');
-    const currencies = ['USD', 'EUR', 'GBP', 'INR', 'JPY', 'AUD', 'CAD', 'CNY'];
 
-    useEffect(() => {
-        setV1(''); setV2(''); setV3(''); setRes(null); setLoading(false);
-    }, [tool.id]);
+    useEffect(() => { setV1(''); setV2(''); setV3(''); setRes(null); setLoading(false); }, [tool.id]);
 
     const calc = async () => {
         setRes(null);
         try {
             if (tool.id === 'calc-bmi') {
-                 if(!v1 || !v2) return;
-                 const h = parseFloat(v1)/100; const w = parseFloat(v2);
-                 const bmi = w/(h*h);
-                 let c = bmi<18.5?'Underweight':bmi<25?'Normal':bmi<30?'Overweight':'Obese';
-                 setRes(`${bmi.toFixed(2)} (${c})`);
+                 const h = parseFloat(v1)/100, w = parseFloat(v2), bmi = w/(h*h);
+                 setRes(`${bmi.toFixed(2)} (${bmi<18.5?'Underweight':bmi<25?'Normal':bmi<30?'Overweight':'Obese'})`);
             }
             if (tool.id === 'calc-age') {
-                 if(!v1) return;
-                 const b = new Date(v1); const n = new Date();
-                 let y = n.getFullYear() - b.getFullYear();
-                 let m = n.getMonth() - b.getMonth();
-                 let d = n.getDate() - b.getDate();
+                 const b = new Date(v1), n = new Date();
+                 let y = n.getFullYear() - b.getFullYear(), m = n.getMonth() - b.getMonth(), d = n.getDate() - b.getDate();
                  if(d<0) { m--; d+=new Date(n.getFullYear(),n.getMonth(),0).getDate(); }
                  if(m<0) { y--; m+=12; }
                  setRes(`${y} Years, ${m} Months, ${d} Days`);
             }
-            if (tool.id === 'calc-sci') {
-                if(!v1) return;
-                // eslint-disable-next-line no-eval
-                setRes(eval(v1).toString());
-            }
+            if (tool.id === 'calc-sci') setRes(eval(v1).toString());
             if (tool.id === 'calc-emi') {
-                const P = parseFloat(v1); const R = parseFloat(v2)/1200; const N = parseFloat(v3);
-                if(!P || !R || !N) return;
-                const emi = (P * R * Math.pow(1+R,N))/(Math.pow(1+R,N)-1);
-                setRes(`Monthly EMI: ${emi.toFixed(2)}`);
+                const P = parseFloat(v1), R = parseFloat(v2)/1200, N = parseFloat(v3);
+                setRes(`EMI: ${(P * R * Math.pow(1+R,N))/(Math.pow(1+R,N)-1)}.toFixed(2)`);
             }
             if (tool.id === 'calc-gst') {
-                const amt = parseFloat(v1); const rate = parseFloat(v2);
-                if(!amt || !rate) return;
-                const gst = (amt * rate)/100;
-                setRes(`GST: ${gst.toFixed(2)} | Total: ${(amt+gst).toFixed(2)}`);
+                const a = parseFloat(v1), r = parseFloat(v2), gst = (a*r)/100;
+                setRes(`GST: ${gst.toFixed(2)} | Total: ${(a+gst).toFixed(2)}`);
             }
             if (tool.id === 'calc-curr') {
-                if(!v1) return;
                 setLoading(true);
-                try {
-                    const r = await fetch(`https://api.exchangerate-api.com/v4/latest/${currFrom}`);
-                    const d = await r.json();
-                    const rate = d.rates[currTo];
-                    setRes(`${v1} ${currFrom} = ${(parseFloat(v1)*rate).toFixed(2)} ${currTo}`);
-                } catch { setRes('Error fetching rates'); }
+                const r = await fetch(`https://api.exchangerate-api.com/v4/latest/${currFrom}`).then(r=>r.json());
+                setRes(`${v1} ${currFrom} = ${(parseFloat(v1)*r.rates[currTo]).toFixed(2)} ${currTo}`);
                 setLoading(false);
             }
-        } catch(e) { setRes('Error'); }
+        } catch { setRes('Error'); setLoading(false); }
     }
 
     return (
-        <div className="w-full max-w-lg mx-auto mt-8">
-            <div className="grid gap-4 mb-6 text-left">
-                {tool.id === 'calc-bmi' && (
-                    <>
-                        <div><label className="block text-sm font-medium mb-1">Height (cm)</label><input type="number" value={v1} onChange={e=>setV1(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-primary outline-none" placeholder="e.g. 175"/></div>
-                        <div><label className="block text-sm font-medium mb-1">Weight (kg)</label><input type="number" value={v2} onChange={e=>setV2(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-primary outline-none" placeholder="e.g. 70"/></div>
-                    </>
-                )}
-                {tool.id === 'calc-age' && (
-                    <div><label className="block text-sm font-medium mb-1">Date of Birth</label><input type="date" value={v1} onChange={e=>setV1(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-primary outline-none"/></div>
-                )}
-                {tool.id === 'calc-sci' && (
-                    <div><label className="block text-sm font-medium mb-1">Expression</label><input type="text" value={v1} onChange={e=>setV1(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-primary outline-none" placeholder="e.g. 5 * (10 + 2)"/></div>
-                )}
-                {tool.id === 'calc-emi' && (
-                    <>
-                        <div><label className="block text-sm font-medium mb-1">Loan Amount</label><input type="number" value={v1} onChange={e=>setV1(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="100000"/></div>
-                        <div><label className="block text-sm font-medium mb-1">Interest Rate (% p.a)</label><input type="number" value={v2} onChange={e=>setV2(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="10.5"/></div>
-                        <div><label className="block text-sm font-medium mb-1">Tenure (Months)</label><input type="number" value={v3} onChange={e=>setV3(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="12"/></div>
-                    </>
-                )}
-                {tool.id === 'calc-gst' && (
-                    <>
-                        <div><label className="block text-sm font-medium mb-1">Amount</label><input type="number" value={v1} onChange={e=>setV1(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="1000"/></div>
-                        <div><label className="block text-sm font-medium mb-1">GST Rate (%)</label><input type="number" value={v2} onChange={e=>setV2(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="18"/></div>
-                    </>
-                )}
-                {tool.id === 'calc-curr' && (
-                    <>
-                        <div><label className="block text-sm font-medium mb-1">Amount</label><input type="number" value={v1} onChange={e=>setV1(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="1"/></div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium mb-1">From</label>
-                                <select value={currFrom} onChange={e=>setCurrFrom(e.target.value)} className="w-full p-3 border rounded-lg">{currencies.map(c=><option key={c} value={c}>{c}</option>)}</select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium mb-1">To</label>
-                                <select value={currTo} onChange={e=>setCurrTo(e.target.value)} className="w-full p-3 border rounded-lg">{currencies.map(c=><option key={c} value={c}>{c}</option>)}</select>
-                            </div>
-                        </div>
-                    </>
-                )}
-            </div>
-            
-            <button onClick={calc} disabled={loading} className="w-full py-3 bg-primary text-white rounded-full font-bold shadow-md hover:bg-primary-dark transition-all">
-                {loading ? 'Calculating...' : 'Calculate'}
-            </button>
-            
-            {res && (
-                <div className="mt-6 p-6 bg-green-50 border border-green-200 rounded-xl animate-fade-in">
-                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Result</p>
-                    <p className="text-2xl font-bold text-green-700">{res}</p>
-                </div>
-            )}
+        <div className="w-full max-w-lg mx-auto mt-8 text-left space-y-4">
+             {tool.id === 'calc-sci' ? <input className="w-full p-2 border rounded" value={v1} onChange={e=>setV1(e.target.value)} placeholder="Expression" /> : 
+              tool.id === 'calc-age' ? <input type="date" className="w-full p-2 border rounded" value={v1} onChange={e=>setV1(e.target.value)} /> :
+              tool.id === 'calc-curr' ? <div className="space-y-2"><input type="number" className="w-full p-2 border rounded" value={v1} onChange={e=>setV1(e.target.value)} placeholder="Amount" /><div className="flex gap-2"><select className="w-1/2 p-2 border rounded" value={currFrom} onChange={e=>setCurrFrom(e.target.value)}>{['USD','EUR','GBP','INR'].map(c=><option key={c}>{c}</option>)}</select><select className="w-1/2 p-2 border rounded" value={currTo} onChange={e=>setCurrTo(e.target.value)}>{['USD','EUR','GBP','INR'].map(c=><option key={c}>{c}</option>)}</select></div></div> :
+              <><input type="number" className="w-full p-2 border rounded" value={v1} onChange={e=>setV1(e.target.value)} placeholder={tool.id==='calc-bmi'?'Height (cm)':'Amount'} />
+              <input type="number" className="w-full p-2 border rounded" value={v2} onChange={e=>setV2(e.target.value)} placeholder={tool.id==='calc-bmi'?'Weight (kg)':'Rate/Interest'} />
+              {tool.id==='calc-emi' && <input type="number" className="w-full p-2 border rounded" value={v3} onChange={e=>setV3(e.target.value)} placeholder="Months" />}</>
+             }
+             <button onClick={calc} className="w-full py-2 bg-primary text-white rounded">{loading?'...':'Calculate'}</button>
+             {res && <div className="p-4 bg-green-100 rounded text-center font-bold text-green-800">{res}</div>}
         </div>
     )
 }
 
-const GeneratorTools: React.FC<{ tool: Tool }> = ({ tool }) => {
+const UtilityTools: React.FC<{ tool: Tool }> = ({ tool }) => {
     const [out, setOut] = useState('');
     const [c1, setC1] = useState('#000000');
     const [c2, setC2] = useState('#ffffff');
+    // Unit Converter State
+    const [uVal, setUVal] = useState(0);
+    const [uFrom, setUFrom] = useState('m');
+    const [uTo, setUTo] = useState('ft');
 
     const gen = () => {
         if(tool.id === 'util-uuid') setOut(crypto.randomUUID());
         if(tool.id === 'col-grad') setOut(`background: linear-gradient(to right, ${c1}, ${c2});`);
-        if(tool.id === 'col-hex') { const r = parseInt(c1.slice(1,3),16); const g=parseInt(c1.slice(3,5),16); const b=parseInt(c1.slice(5,7),16); setOut(`rgb(${r},${g},${b})`); }
+        if(tool.id === 'col-hex') { const r = parseInt(c1.slice(1,3),16), g=parseInt(c1.slice(3,5),16), b=parseInt(c1.slice(5,7),16); setOut(`rgb(${r},${g},${b})`); }
+        if(tool.id === 'col-cont') setOut(`Ratio: ${getContrastRatio(c1, c2).toFixed(2)}:1`);
+    }
+
+    const unitConv = () => {
+        // Simple scale relative to meter or kg
+        const scales: any = { m:1, km:1000, cm:0.01, ft:0.3048, in:0.0254, kg:1, g:0.001, lb:0.453592 };
+        if(scales[uFrom] && scales[uTo]) setOut(`${uVal} ${uFrom} = ${(uVal * scales[uFrom] / scales[uTo]).toFixed(4)} ${uTo}`);
+        else setOut("Incompatible units");
     }
 
     return (
         <div className="w-full max-w-lg mx-auto mt-8 text-left">
-             <div className="mb-4">
-                 {(tool.id === 'col-grad' || tool.id === 'col-hex') && <input type="color" value={c1} onChange={e=>setC1(e.target.value)} className="h-12 w-full mb-2"/>}
-                 {tool.id === 'col-grad' && <input type="color" value={c2} onChange={e=>setC2(e.target.value)} className="h-12 w-full"/>}
-             </div>
-             <button onClick={gen} className="w-full py-3 bg-primary text-white rounded font-bold mb-4">Generate</button>
-             {out && <div className="p-4 bg-slate-50 border rounded break-all font-mono">{out}</div>}
+             {(tool.id.startsWith('col-')) && <div className="mb-4 flex gap-2"><input type="color" value={c1} onChange={e=>setC1(e.target.value)} className="h-10 w-full"/><input type="color" value={c2} onChange={e=>setC2(e.target.value)} className="h-10 w-full"/></div>}
+             
+             {tool.id === 'util-qr' && <><input className="w-full p-2 border rounded mb-2" value={out} onChange={e=>setOut(e.target.value)} placeholder="Text for QR" /><div className="text-center">{out && <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(out)}`} className="mx-auto" />}</div></>}
+             
+             {tool.id === 'util-bar' && <><input className="w-full p-2 border rounded mb-2" value={out} onChange={e=>setOut(e.target.value)} placeholder="Text for Barcode" /><div className="text-center">{out && <img src={`https://bwipjs-api.metafloor.com/?bcid=code128&text=${encodeURIComponent(out)}`} className="mx-auto" />}</div></>}
+
+             {tool.id === 'util-unit' && <div className="space-y-2 mb-4">
+                 <input type="number" value={uVal} onChange={e=>setUVal(parseFloat(e.target.value))} className="w-full p-2 border rounded"/>
+                 <div className="flex gap-2">
+                     <select value={uFrom} onChange={e=>setUFrom(e.target.value)} className="w-1/2 p-2 border rounded">{['m','km','ft','kg','lb'].map(u=><option key={u}>{u}</option>)}</select>
+                     <select value={uTo} onChange={e=>setUTo(e.target.value)} className="w-1/2 p-2 border rounded">{['m','km','ft','kg','lb'].map(u=><option key={u}>{u}</option>)}</select>
+                 </div>
+                 <button onClick={unitConv} className="w-full py-2 bg-primary text-white rounded">Convert</button>
+             </div>}
+
+             {!['util-qr','util-bar','util-unit'].includes(tool.id) && <button onClick={gen} className="w-full py-3 bg-primary text-white rounded font-bold mb-4">Generate / Calculate</button>}
+             
+             {out && !['util-qr','util-bar'].includes(tool.id) && <div className="p-4 bg-slate-50 border rounded break-all font-mono text-center">{out}</div>}
+        </div>
+    )
+}
+
+const SeoTools: React.FC<{ tool: Tool }> = ({ tool }) => {
+    const [input, setInput] = useState('');
+    const [res, setRes] = useState<any>(null);
+
+    const analyze = () => {
+        if(tool.id === 'seo-kw') {
+             const w = input.toLowerCase().match(/\b\w{4,}\b/g) || [];
+             const f: Record<string, number> = {}; 
+             w.forEach((x: string) => f[x]=(f[x]||0)+1);
+             setRes(Object.entries(f).sort((a:any,b:any)=>b[1]-a[1]).slice(0,10));
+        }
+        if(tool.id === 'seo-meta') {
+             const d = new DOMParser().parseFromString(input, 'text/html');
+             setRes({ t: d.title, d: d.querySelector('meta[name="description"]')?.getAttribute('content'), k: d.querySelector('meta[name="keywords"]')?.getAttribute('content') });
+        }
+    }
+
+    return (
+        <div className="w-full max-w-4xl mx-auto mt-8 text-left">
+            <textarea value={input} onChange={e=>setInput(e.target.value)} className="w-full h-48 p-4 border rounded mb-4" placeholder={tool.id==='seo-kw'?"Text Content":"HTML Source Code"} />
+            <button onClick={analyze} className="btn bg-primary text-white px-6 py-2 rounded mb-4">Analyze</button>
+            {res && <div className="bg-slate-50 p-4 border rounded">
+                {tool.id === 'seo-kw' ? (res as [string, number][]).map(([k,v]) => <div key={k}>{k}: {v}</div>) : <div><div>Title: {res.t}</div><div>Desc: {res.d}</div><div>Keywords: {res.k}</div></div>}
+            </div>}
         </div>
     )
 }
 
 const DocumentTools: React.FC<{ tool: Tool }> = ({ tool }) => {
     const [file, setFile] = useState<File|null>(null);
-    const [file2, setFile2] = useState<File|null>(null); // For merge
-    const [textInput, setTextInput] = useState(''); // For Word to PDF
-    const [password, setPassword] = useState(''); // For Lock
+    const [file2, setFile2] = useState<File|null>(null);
+    const [textInput, setTextInput] = useState('');
+    const [password, setPassword] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [status, setStatus] = useState('');
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [isDrawing, setIsDrawing] = useState(false);
 
-    useEffect(() => {
-        setFile(null); setFile2(null); setTextInput(''); setPassword(''); setStatus('');
-    }, [tool.id]);
-
-    // -- Handlers --
+    useEffect(() => { setFile(null); setFile2(null); setTextInput(''); setPassword(''); setStatus(''); }, [tool.id]);
 
     const handlePdfToWord = async () => {
         if(!file) return;
-        setIsLoading(true);
-        setStatus("Processing with AI... This may take a moment.");
+        setIsLoading(true); setStatus("Processing with AI...");
         try {
-             const base64Data = await new Promise<string>((resolve) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve((reader.result as string).split(',')[1]);
-                reader.readAsDataURL(file);
-             });
-
+             const b64 = await new Promise<string>((resolve) => { const r = new FileReader(); r.onload = () => resolve((r.result as string).split(',')[1]); r.readAsDataURL(file); });
              const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-             // Check if model supports PDF or just text extraction
-             const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview',
-                contents: {
-                  parts: [
-                    { inlineData: { mimeType: 'application/pdf', data: base64Data } },
-                    { text: "Extract all text from this PDF document. Return only the raw text content." }
-                  ]
-                }
-             });
-             
-             const text = response.text;
-             if(text) {
-                 download(text, "extracted_text.txt", "text/plain");
-                 setStatus("Success! Text file downloaded.");
-             } else {
-                 setStatus("Failed to extract text.");
-             }
-        } catch(e) { console.error(e); setStatus("Error: " + (e as Error).message); }
+             const res = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: { parts: [{ inlineData: { mimeType: 'application/pdf', data: b64 } }, { text: "Extract text." }] } });
+             download(res.text, "extracted.txt", "text/plain");
+             setStatus("Success!");
+        } catch(e) { setStatus("Error: " + (e as Error).message); }
         finally { setIsLoading(false); }
     };
 
@@ -908,134 +715,29 @@ const DocumentTools: React.FC<{ tool: Tool }> = ({ tool }) => {
         if(!textInput) return;
         setIsLoading(true);
         try {
-            const pdfDoc = await PDFLib.PDFDocument.create();
-            const page = pdfDoc.addPage();
-            const { width, height } = page.getSize();
-            const fontSize = 12;
-            page.drawText(textInput, { x: 50, y: height - 4 * fontSize, size: fontSize, maxWidth: width - 100 });
-            const pdfBytes = await pdfDoc.save();
-            download(pdfBytes, "document.pdf", "application/pdf");
-            setStatus("PDF Created successfully!");
-        } catch(e) { setStatus("Error creating PDF"); }
+            const doc = await PDFLib.PDFDocument.create();
+            const p = doc.addPage();
+            p.drawText(textInput, { x: 50, y: p.getHeight() - 50, size: 12 });
+            download(await doc.save(), "doc.pdf", "application/pdf");
+            setStatus("Success!");
+        } catch { setStatus("Error"); }
         finally { setIsLoading(false); }
     };
-
-    const handleMerge = async () => {
-        if(!file || !file2) return;
-        setIsLoading(true);
-        try {
-            const pdfDoc = await PDFLib.PDFDocument.create();
-            const [b1, b2] = await Promise.all([file.arrayBuffer(), file2.arrayBuffer()]);
-            const d1 = await PDFLib.PDFDocument.load(b1);
-            const d2 = await PDFLib.PDFDocument.load(b2);
-            
-            const p1 = await pdfDoc.copyPages(d1, d1.getPageIndices());
-            p1.forEach((p:any) => pdfDoc.addPage(p));
-            const p2 = await pdfDoc.copyPages(d2, d2.getPageIndices());
-            p2.forEach((p:any) => pdfDoc.addPage(p));
-            
-            const bytes = await pdfDoc.save();
-            download(bytes, "merged.pdf", "application/pdf");
-            setStatus("Merged successfully!");
-        } catch(e) { setStatus("Error merging PDFs. Ensure valid PDF files."); }
-        finally { setIsLoading(false); }
-    }
-
-    const handleLock = async () => {
-        if(!file || !password) return;
-        setIsLoading(true);
-        try {
-            const bytes = await file.arrayBuffer();
-            const pdfDoc = await PDFLib.PDFDocument.load(bytes);
-            pdfDoc.encrypt({ userPassword: password, ownerPassword: password });
-            const saved = await pdfDoc.save();
-            download(saved, "protected.pdf", "application/pdf");
-            setStatus("PDF Locked & Downloaded.");
-        } catch(e) { setStatus("Error processing PDF."); }
-        finally { setIsLoading(false); }
-    }
-
-    // Canvas Signature Logic
-    const startDraw = (e: any) => {
-        const ctx = canvasRef.current?.getContext('2d');
-        if(!ctx) return;
-        setIsDrawing(true);
-        const rect = canvasRef.current!.getBoundingClientRect();
-        const x = (e.clientX || e.touches[0].clientX) - rect.left;
-        const y = (e.clientY || e.touches[0].clientY) - rect.top;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-    }
-    const draw = (e: any) => {
-        if(!isDrawing || !canvasRef.current) return;
-        const ctx = canvasRef.current.getContext('2d');
-        const rect = canvasRef.current.getBoundingClientRect();
-        const x = (e.clientX || e.touches[0].clientX) - rect.left;
-        const y = (e.clientY || e.touches[0].clientY) - rect.top;
-        if(ctx) { ctx.lineTo(x, y); ctx.stroke(); }
-    }
-    const endDraw = () => setIsDrawing(false);
-    const clearSig = () => {
-        const ctx = canvasRef.current?.getContext('2d');
-        if(ctx && canvasRef.current) ctx.clearRect(0,0,canvasRef.current.width, canvasRef.current.height);
-    }
-    const saveSig = () => {
-         if(canvasRef.current) {
-             const url = canvasRef.current.toDataURL("image/png");
-             download(url, "signature.png", "image/png");
-         }
-    }
+    
+    // Canvas Sig
+    const start = (e: any) => { setIsDrawing(true); draw(e); }
+    const draw = (e: any) => { if(!isDrawing||!canvasRef.current)return; const c=canvasRef.current.getContext('2d'); const r=canvasRef.current.getBoundingClientRect(); if(c){ c.lineTo((e.clientX||e.touches[0].clientX)-r.left, (e.clientY||e.touches[0].clientY)-r.top); c.stroke(); c.beginPath(); c.moveTo((e.clientX||e.touches[0].clientX)-r.left, (e.clientY||e.touches[0].clientY)-r.top); } }
 
     return (
-        <div className="w-full max-w-2xl mx-auto mt-8 text-center">
-            {/* File Inputs */}
-            {['doc-p2w', 'doc-mrg', 'doc-lock', 'doc-comp'].includes(tool.id) && (
-                <div className="mb-6">
-                    <label className="block mb-2 font-semibold">Upload PDF</label>
-                    <input type="file" accept=".pdf" onChange={e => setFile(e.target.files?.[0] || null)} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
-                </div>
-            )}
+        <div className="w-full max-w-2xl mx-auto mt-8 text-center space-y-4">
+            {['doc-p2w','doc-mrg','doc-lock','doc-comp'].includes(tool.id) && <input type="file" accept=".pdf" onChange={e=>setFile(e.target.files?.[0]||null)} className="block w-full border rounded p-2"/>}
+            {tool.id === 'doc-mrg' && <input type="file" accept=".pdf" onChange={e=>setFile2(e.target.files?.[0]||null)} className="block w-full border rounded p-2"/>}
+            {tool.id === 'doc-w2p' && <textarea className="w-full h-48 border p-4 rounded" value={textInput} onChange={e=>setTextInput(e.target.value)} placeholder="Type content..."/>}
+            {tool.id === 'doc-lock' && <input className="w-full border p-2 rounded" type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Password"/>}
+            {tool.id === 'doc-sign' && <><canvas ref={canvasRef} width={500} height={200} className="border bg-white mx-auto" onMouseDown={start} onMouseMove={draw} onMouseUp={()=>setIsDrawing(false)} onTouchStart={start} onTouchMove={draw} onTouchEnd={()=>setIsDrawing(false)} /><button onClick={()=>{const c=canvasRef.current?.getContext('2d'); c?.clearRect(0,0,500,200); c?.beginPath();}} className="btn bg-slate-300 px-4 py-2 rounded">Clear</button></>}
             
-            {tool.id === 'doc-mrg' && (
-                <div className="mb-6">
-                    <label className="block mb-2 font-semibold">Upload Second PDF</label>
-                    <input type="file" accept=".pdf" onChange={e => setFile2(e.target.files?.[0] || null)} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
-                </div>
-            )}
-
-            {tool.id === 'doc-w2p' && (
-                <textarea value={textInput} onChange={e => setTextInput(e.target.value)} className="w-full h-64 p-4 border rounded-lg mb-4" placeholder="Type your document content here..."></textarea>
-            )}
-
-            {tool.id === 'doc-lock' && (
-                <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="p-3 border rounded w-full mb-4" placeholder="Enter Password to Lock"/>
-            )}
-
-            {tool.id === 'doc-sign' && (
-                <div className="mb-4">
-                    <canvas 
-                        ref={canvasRef} 
-                        width={500} 
-                        height={200} 
-                        className="border-2 border-dashed border-slate-300 rounded bg-white cursor-crosshair touch-none"
-                        onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
-                        onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw}
-                    ></canvas>
-                    <div className="flex gap-4 justify-center mt-2">
-                        <button onClick={clearSig} className="px-4 py-2 bg-slate-200 rounded">Clear</button>
-                        <button onClick={saveSig} className="px-4 py-2 bg-primary text-white rounded">Download Signature</button>
-                    </div>
-                </div>
-            )}
-
-            {/* Action Buttons */}
-            {tool.id === 'doc-p2w' && <button onClick={handlePdfToWord} disabled={isLoading || !file} className="btn-primary px-8 py-3 bg-primary text-white rounded-full">{isLoading ? 'Extracting...' : 'Extract Text from PDF'}</button>}
-            {tool.id === 'doc-w2p' && <button onClick={handleWordToPdf} disabled={isLoading || !textInput} className="btn-primary px-8 py-3 bg-primary text-white rounded-full">Convert to PDF</button>}
-            {tool.id === 'doc-mrg' && <button onClick={handleMerge} disabled={isLoading || !file || !file2} className="btn-primary px-8 py-3 bg-primary text-white rounded-full">Merge PDFs</button>}
-            {tool.id === 'doc-lock' && <button onClick={handleLock} disabled={isLoading || !file || !password} className="btn-primary px-8 py-3 bg-primary text-white rounded-full">Lock PDF</button>}
-            {tool.id === 'doc-comp' && file && <button onClick={() => { download(file, "compressed_" + file.name, "application/pdf"); setStatus("File processed (Simulated compression)"); }} className="btn-primary px-8 py-3 bg-primary text-white rounded-full">Compress PDF</button>}
-
-            {status && <div className="mt-6 p-4 bg-slate-100 rounded text-secondary font-medium">{status}</div>}
+            <button onClick={() => { if(tool.id==='doc-p2w') handlePdfToWord(); else if(tool.id==='doc-w2p') handleWordToPdf(); else if(tool.id==='doc-sign') download(canvasRef.current?.toDataURL(), "sig.png", "image/png"); }} disabled={isLoading} className="btn bg-primary text-white px-6 py-2 rounded">{isLoading?'Working...':'Process'}</button>
+            {status && <div>{status}</div>}
         </div>
     )
 }
@@ -1062,10 +764,11 @@ const App: React.FC = () => {
       if (activeTool.id === 'img-ocr') return <ImageToText />;
       if (activeTool.id === 'web-html') return <CodeToHtml />;
       if (['img-conv', 'img-comp', 'img-res', 'img-crop', 'img-rot', 'col-pick'].includes(activeTool.id)) return <ImageTools tool={activeTool} />;
-      if (['txt-case', 'txt-count', 'txt-dup', 'txt-sort', 'web-json', 'web-min', 'web-b64', 'web-url'].includes(activeTool.id)) return <TextTools tool={activeTool} />;
+      if (['txt-case', 'txt-count', 'txt-dup', 'txt-sort', 'web-json', 'web-min', 'web-b64', 'web-url', 'txt-enc'].includes(activeTool.id)) return <TextTools tool={activeTool} />;
       if (['calc-bmi', 'calc-age', 'calc-emi', 'calc-gst', 'calc-sci', 'calc-curr'].includes(activeTool.id)) return <CalculatorTools tool={activeTool} />;
-      if (['util-uuid', 'util-rand', 'col-hex', 'col-grad'].includes(activeTool.id)) return <GeneratorTools tool={activeTool} />;
+      if (['util-uuid', 'util-rand', 'col-hex', 'col-grad', 'col-cont', 'util-qr', 'util-bar', 'util-unit'].includes(activeTool.id)) return <UtilityTools tool={activeTool} />;
       if (['doc-p2w', 'doc-w2p', 'doc-mrg', 'doc-lock', 'doc-comp', 'doc-sign'].includes(activeTool.id)) return <DocumentTools tool={activeTool} />;
+      if (['seo-kw', 'seo-meta'].includes(activeTool.id)) return <SeoTools tool={activeTool} />;
 
       return (
         <div className="p-12 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 inline-block max-w-lg mx-auto">

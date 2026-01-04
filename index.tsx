@@ -5,6 +5,9 @@ import { GoogleGenAI } from "@google/genai";
 // Declare global libraries added via CDN
 declare var PDFLib: any;
 declare var download: any;
+declare var pdfjsLib: any;
+declare var docx: any;
+declare var saveAs: any;
 
 // --- TYPES ---
 interface Tool {
@@ -45,7 +48,7 @@ const TOOLS_DATA: Category[] = [
     description: 'Manage PDFs and Documents efficiently.',
     iconClass: 'fas fa-file-pdf',
     tools: [
-      { id: 'doc-p2w', name: 'PDF to Word (AI)', description: 'Extract text from PDF files using AI.', iconClass: 'fas fa-file-word' },
+      { id: 'doc-p2w', name: 'PDF to Word (AI)', description: 'Extract text and structure from PDF to Docx.', iconClass: 'fas fa-file-word' },
       { id: 'doc-w2p', name: 'Word to PDF', description: 'Convert text/content to PDF format.', iconClass: 'fas fa-file-pdf' },
       { id: 'doc-mrg', name: 'PDF Merger', description: 'Combine multiple PDF files into one.', iconClass: 'fas fa-object-group' },
       { id: 'doc-lock', name: 'PDF Lock', description: 'Add password protection to your PDF.', iconClass: 'fas fa-lock' },
@@ -411,6 +414,172 @@ const ImageToText: React.FC = () => {
   );
 };
 
+const PdfToWord: React.FC = () => {
+    const [file, setFile] = useState<File | null>(null);
+    const [statusText, setStatusText] = useState('');
+    const [progress, setProgress] = useState(0);
+    const [processing, setProcessing] = useState(false);
+    const [generatedDocBlob, setGeneratedDocBlob] = useState<Blob | null>(null);
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const f = e.target.files?.[0];
+        if (f) {
+            setFile(f);
+            setStatusText('');
+            setGeneratedDocBlob(null);
+            setProgress(0);
+        }
+    };
+
+    const convert = async () => {
+        if (!file) return;
+        setProcessing(true);
+        setStatusText("Initializing...");
+        
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+            const totalPages = pdf.numPages;
+            const docChildren: any[] = [];
+
+            for (let i = 1; i <= totalPages; i++) {
+                setProgress(Math.round((i / totalPages) * 100));
+                setStatusText(`Reading page ${i} of ${totalPages}...`);
+                
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                
+                let lastY = -1;
+                let lineText = "";
+                
+                // Sort by Y (desc) then X (asc)
+                const items = textContent.items.sort((a: any, b: any) => {
+                    if (Math.abs(a.transform[5] - b.transform[5]) > 5) {
+                        return b.transform[5] - a.transform[5];
+                    }
+                    return a.transform[4] - b.transform[4];
+                });
+
+                items.forEach((item: any) => {
+                    if (lastY !== -1 && Math.abs(item.transform[5] - lastY) > 10) {
+                        docChildren.push(
+                            new docx.Paragraph({
+                                children: [new docx.TextRun(lineText)],
+                                spacing: { after: 200 }
+                            })
+                        );
+                        lineText = "";
+                    }
+                    lineText += item.str + (item.hasEOL ? "\n" : " ");
+                    lastY = item.transform[5];
+                });
+
+                if (lineText.trim().length > 0) {
+                     docChildren.push(
+                        new docx.Paragraph({
+                            children: [new docx.TextRun(lineText)],
+                            spacing: { after: 200 }
+                        })
+                    );
+                }
+
+                if (i < totalPages) {
+                    docChildren.push(new docx.Paragraph({ children: [new docx.PageBreak()] }));
+                }
+            }
+
+            setStatusText("Generating Word Document...");
+            const doc = new docx.Document({
+                sections: [{ properties: {}, children: docChildren }],
+            });
+
+            const blob = await docx.Packer.toBlob(doc);
+            setGeneratedDocBlob(blob);
+            setStatusText("Conversion Complete!");
+            setProcessing(false);
+
+        } catch (e) {
+            console.error(e);
+            setStatusText("Error: " + (e as Error).message);
+            setProcessing(false);
+        }
+    };
+
+    const downloadDoc = () => {
+        if (generatedDocBlob && file) {
+            saveAs(generatedDocBlob, file.name.replace('.pdf', '.docx'));
+        }
+    }
+
+    return (
+        <div className="w-full max-w-2xl mx-auto mt-8 bg-white p-8 rounded-xl shadow-sm border border-slate-100">
+             {!file && (
+                 <div className="border-2 border-dashed border-blue-200 rounded-xl bg-blue-50/50 p-12 text-center hover:bg-blue-50 transition-colors">
+                     <i className="fas fa-file-pdf text-5xl text-blue-400 mb-4"></i>
+                     <p className="text-slate-600 font-medium mb-4">Click to upload your PDF</p>
+                     <input type="file" accept=".pdf" onChange={handleFileChange} className="block w-full text-sm text-slate-500
+                        file:mr-4 file:py-2 file:px-4
+                        file:rounded-full file:border-0
+                        file:text-sm file:font-semibold
+                        file:bg-blue-50 file:text-blue-700
+                        hover:file:bg-blue-100
+                      " />
+                 </div>
+             )}
+
+             {file && (
+                 <div className="space-y-6">
+                     <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                         <i className="fas fa-file-pdf text-3xl text-red-500"></i>
+                         <div className="flex-grow overflow-hidden">
+                             <p className="font-semibold text-slate-700 truncate">{file.name}</p>
+                             <p className="text-sm text-slate-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                         </div>
+                         <button onClick={() => { setFile(null); setGeneratedDocBlob(null); }} className="text-slate-400 hover:text-slate-600">
+                             <i className="fas fa-times"></i>
+                         </button>
+                     </div>
+
+                     {processing && (
+                        <div className="space-y-2">
+                             <div className="w-full bg-slate-100 rounded-full h-2.5">
+                                <div className="bg-primary h-2.5 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
+                             </div>
+                             <p className="text-xs text-center text-slate-500">{statusText}</p>
+                        </div>
+                     )}
+
+                     {!processing && !generatedDocBlob && (
+                         <button onClick={convert} className="w-full py-3 bg-primary text-white font-bold rounded-lg shadow-lg hover:bg-primary-dark transition-all">
+                             Convert to Word
+                         </button>
+                     )}
+
+                     {!processing && generatedDocBlob && (
+                         <div className="text-center space-y-4">
+                             <div className="p-4 bg-green-50 text-green-700 rounded-lg border border-green-200">
+                                 <i className="fas fa-check-circle mr-2"></i> {statusText}
+                             </div>
+                             <button onClick={downloadDoc} className="w-full py-3 bg-green-600 text-white font-bold rounded-lg shadow-lg hover:bg-green-700 transition-all">
+                                 <i className="fas fa-download mr-2"></i> Download .docx
+                             </button>
+                             <button onClick={() => { setFile(null); setGeneratedDocBlob(null); }} className="text-slate-500 text-sm hover:underline">
+                                 Convert Another File
+                             </button>
+                         </div>
+                     )}
+                     
+                     {!processing && !generatedDocBlob && statusText.startsWith('Error') && (
+                        <div className="p-4 bg-red-50 text-red-600 rounded-lg text-center border border-red-200">
+                            {statusText}
+                        </div>
+                     )}
+                 </div>
+             )}
+        </div>
+    );
+};
+
 const CodeToHtml: React.FC = () => {
   const [inputCode, setInputCode] = useState('');
   const [outputHtml, setOutputHtml] = useState('');
@@ -698,19 +867,6 @@ const DocumentTools: React.FC<{ tool: Tool }> = ({ tool }) => {
 
     useEffect(() => { setFile(null); setFile2(null); setTextInput(''); setPassword(''); setStatus(''); }, [tool.id]);
 
-    const handlePdfToWord = async () => {
-        if(!file) return;
-        setIsLoading(true); setStatus("Processing with AI...");
-        try {
-             const b64 = await new Promise<string>((resolve) => { const r = new FileReader(); r.onload = () => resolve((r.result as string).split(',')[1]); r.readAsDataURL(file); });
-             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-             const res = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: { parts: [{ inlineData: { mimeType: 'application/pdf', data: b64 } }, { text: "Extract text." }] } });
-             download(res.text, "extracted.txt", "text/plain");
-             setStatus("Success!");
-        } catch(e) { setStatus("Error: " + (e as Error).message); }
-        finally { setIsLoading(false); }
-    };
-
     const handleWordToPdf = async () => {
         if(!textInput) return;
         setIsLoading(true);
@@ -730,13 +886,13 @@ const DocumentTools: React.FC<{ tool: Tool }> = ({ tool }) => {
 
     return (
         <div className="w-full max-w-2xl mx-auto mt-8 text-center space-y-4">
-            {['doc-p2w','doc-mrg','doc-lock','doc-comp'].includes(tool.id) && <input type="file" accept=".pdf" onChange={e=>setFile(e.target.files?.[0]||null)} className="block w-full border rounded p-2"/>}
+            {['doc-mrg','doc-lock','doc-comp'].includes(tool.id) && <input type="file" accept=".pdf" onChange={e=>setFile(e.target.files?.[0]||null)} className="block w-full border rounded p-2"/>}
             {tool.id === 'doc-mrg' && <input type="file" accept=".pdf" onChange={e=>setFile2(e.target.files?.[0]||null)} className="block w-full border rounded p-2"/>}
             {tool.id === 'doc-w2p' && <textarea className="w-full h-48 border p-4 rounded" value={textInput} onChange={e=>setTextInput(e.target.value)} placeholder="Type content..."/>}
             {tool.id === 'doc-lock' && <input className="w-full border p-2 rounded" type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Password"/>}
             {tool.id === 'doc-sign' && <><canvas ref={canvasRef} width={500} height={200} className="border bg-white mx-auto" onMouseDown={start} onMouseMove={draw} onMouseUp={()=>setIsDrawing(false)} onTouchStart={start} onTouchMove={draw} onTouchEnd={()=>setIsDrawing(false)} /><button onClick={()=>{const c=canvasRef.current?.getContext('2d'); c?.clearRect(0,0,500,200); c?.beginPath();}} className="btn bg-slate-300 px-4 py-2 rounded">Clear</button></>}
             
-            <button onClick={() => { if(tool.id==='doc-p2w') handlePdfToWord(); else if(tool.id==='doc-w2p') handleWordToPdf(); else if(tool.id==='doc-sign') download(canvasRef.current?.toDataURL(), "sig.png", "image/png"); }} disabled={isLoading} className="btn bg-primary text-white px-6 py-2 rounded">{isLoading?'Working...':'Process'}</button>
+            <button onClick={() => { if(tool.id==='doc-w2p') handleWordToPdf(); else if(tool.id==='doc-sign') download(canvasRef.current?.toDataURL(), "sig.png", "image/png"); }} disabled={isLoading} className="btn bg-primary text-white px-6 py-2 rounded">{isLoading?'Working...':'Process'}</button>
             {status && <div>{status}</div>}
         </div>
     )
@@ -762,12 +918,13 @@ const App: React.FC = () => {
   const renderActiveTool = () => {
       if (!activeTool) return null;
       if (activeTool.id === 'img-ocr') return <ImageToText />;
+      if (activeTool.id === 'doc-p2w') return <PdfToWord />;
       if (activeTool.id === 'web-html') return <CodeToHtml />;
       if (['img-conv', 'img-comp', 'img-res', 'img-crop', 'img-rot', 'col-pick'].includes(activeTool.id)) return <ImageTools tool={activeTool} />;
       if (['txt-case', 'txt-count', 'txt-dup', 'txt-sort', 'web-json', 'web-min', 'web-b64', 'web-url', 'txt-enc'].includes(activeTool.id)) return <TextTools tool={activeTool} />;
       if (['calc-bmi', 'calc-age', 'calc-emi', 'calc-gst', 'calc-sci', 'calc-curr'].includes(activeTool.id)) return <CalculatorTools tool={activeTool} />;
       if (['util-uuid', 'util-rand', 'col-hex', 'col-grad', 'col-cont', 'util-qr', 'util-bar', 'util-unit'].includes(activeTool.id)) return <UtilityTools tool={activeTool} />;
-      if (['doc-p2w', 'doc-w2p', 'doc-mrg', 'doc-lock', 'doc-comp', 'doc-sign'].includes(activeTool.id)) return <DocumentTools tool={activeTool} />;
+      if (['doc-w2p', 'doc-mrg', 'doc-lock', 'doc-comp', 'doc-sign'].includes(activeTool.id)) return <DocumentTools tool={activeTool} />;
       if (['seo-kw', 'seo-meta'].includes(activeTool.id)) return <SeoTools tool={activeTool} />;
 
       return (

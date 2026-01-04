@@ -710,30 +710,123 @@ const CalculatorTools: React.FC<{ tool: Tool }> = ({ tool }) => {
     const [v2, setV2] = useState('');
     const [v3, setV3] = useState('');
     const [res, setRes] = useState<string|null>(null);
+    const [loading, setLoading] = useState(false);
 
-    const calc = () => {
-        if (tool.id === 'calc-bmi' && v1 && v2) {
-             const h = parseFloat(v1)/100; const w = parseFloat(v2);
-             setRes((w/(h*h)).toFixed(2));
-        }
-        if (tool.id === 'calc-age' && v1) {
-             const age = Math.floor((new Date().getTime() - new Date(v1).getTime()) / 31557600000);
-             setRes(age + " Years");
-        }
-        if (tool.id === 'calc-sci') {
-            try { setRes(eval(v1)); } catch { setRes('Error'); }
-        }
+    // Currency state
+    const [currFrom, setCurrFrom] = useState('USD');
+    const [currTo, setCurrTo] = useState('EUR');
+    const currencies = ['USD', 'EUR', 'GBP', 'INR', 'JPY', 'AUD', 'CAD', 'CNY'];
+
+    useEffect(() => {
+        setV1(''); setV2(''); setV3(''); setRes(null); setLoading(false);
+    }, [tool.id]);
+
+    const calc = async () => {
+        setRes(null);
+        try {
+            if (tool.id === 'calc-bmi') {
+                 if(!v1 || !v2) return;
+                 const h = parseFloat(v1)/100; const w = parseFloat(v2);
+                 const bmi = w/(h*h);
+                 let c = bmi<18.5?'Underweight':bmi<25?'Normal':bmi<30?'Overweight':'Obese';
+                 setRes(`${bmi.toFixed(2)} (${c})`);
+            }
+            if (tool.id === 'calc-age') {
+                 if(!v1) return;
+                 const b = new Date(v1); const n = new Date();
+                 let y = n.getFullYear() - b.getFullYear();
+                 let m = n.getMonth() - b.getMonth();
+                 let d = n.getDate() - b.getDate();
+                 if(d<0) { m--; d+=new Date(n.getFullYear(),n.getMonth(),0).getDate(); }
+                 if(m<0) { y--; m+=12; }
+                 setRes(`${y} Years, ${m} Months, ${d} Days`);
+            }
+            if (tool.id === 'calc-sci') {
+                if(!v1) return;
+                // eslint-disable-next-line no-eval
+                setRes(eval(v1).toString());
+            }
+            if (tool.id === 'calc-emi') {
+                const P = parseFloat(v1); const R = parseFloat(v2)/1200; const N = parseFloat(v3);
+                if(!P || !R || !N) return;
+                const emi = (P * R * Math.pow(1+R,N))/(Math.pow(1+R,N)-1);
+                setRes(`Monthly EMI: ${emi.toFixed(2)}`);
+            }
+            if (tool.id === 'calc-gst') {
+                const amt = parseFloat(v1); const rate = parseFloat(v2);
+                if(!amt || !rate) return;
+                const gst = (amt * rate)/100;
+                setRes(`GST: ${gst.toFixed(2)} | Total: ${(amt+gst).toFixed(2)}`);
+            }
+            if (tool.id === 'calc-curr') {
+                if(!v1) return;
+                setLoading(true);
+                try {
+                    const r = await fetch(`https://api.exchangerate-api.com/v4/latest/${currFrom}`);
+                    const d = await r.json();
+                    const rate = d.rates[currTo];
+                    setRes(`${v1} ${currFrom} = ${(parseFloat(v1)*rate).toFixed(2)} ${currTo}`);
+                } catch { setRes('Error fetching rates'); }
+                setLoading(false);
+            }
+        } catch(e) { setRes('Error'); }
     }
 
     return (
         <div className="w-full max-w-lg mx-auto mt-8">
-            <div className="grid gap-4 mb-4">
-                {tool.id === 'calc-bmi' && <><input placeholder="Height (cm)" value={v1} onChange={e=>setV1(e.target.value)} className="p-3 border rounded"/><input placeholder="Weight (kg)" value={v2} onChange={e=>setV2(e.target.value)} className="p-3 border rounded"/></>}
-                {tool.id === 'calc-age' && <input type="date" value={v1} onChange={e=>setV1(e.target.value)} className="p-3 border rounded"/>}
-                {tool.id === 'calc-sci' && <input placeholder="Expression (e.g. 5*5)" value={v1} onChange={e=>setV1(e.target.value)} className="p-3 border rounded"/>}
+            <div className="grid gap-4 mb-6 text-left">
+                {tool.id === 'calc-bmi' && (
+                    <>
+                        <div><label className="block text-sm font-medium mb-1">Height (cm)</label><input type="number" value={v1} onChange={e=>setV1(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-primary outline-none" placeholder="e.g. 175"/></div>
+                        <div><label className="block text-sm font-medium mb-1">Weight (kg)</label><input type="number" value={v2} onChange={e=>setV2(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-primary outline-none" placeholder="e.g. 70"/></div>
+                    </>
+                )}
+                {tool.id === 'calc-age' && (
+                    <div><label className="block text-sm font-medium mb-1">Date of Birth</label><input type="date" value={v1} onChange={e=>setV1(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-primary outline-none"/></div>
+                )}
+                {tool.id === 'calc-sci' && (
+                    <div><label className="block text-sm font-medium mb-1">Expression</label><input type="text" value={v1} onChange={e=>setV1(e.target.value)} className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-primary outline-none" placeholder="e.g. 5 * (10 + 2)"/></div>
+                )}
+                {tool.id === 'calc-emi' && (
+                    <>
+                        <div><label className="block text-sm font-medium mb-1">Loan Amount</label><input type="number" value={v1} onChange={e=>setV1(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="100000"/></div>
+                        <div><label className="block text-sm font-medium mb-1">Interest Rate (% p.a)</label><input type="number" value={v2} onChange={e=>setV2(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="10.5"/></div>
+                        <div><label className="block text-sm font-medium mb-1">Tenure (Months)</label><input type="number" value={v3} onChange={e=>setV3(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="12"/></div>
+                    </>
+                )}
+                {tool.id === 'calc-gst' && (
+                    <>
+                        <div><label className="block text-sm font-medium mb-1">Amount</label><input type="number" value={v1} onChange={e=>setV1(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="1000"/></div>
+                        <div><label className="block text-sm font-medium mb-1">GST Rate (%)</label><input type="number" value={v2} onChange={e=>setV2(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="18"/></div>
+                    </>
+                )}
+                {tool.id === 'calc-curr' && (
+                    <>
+                        <div><label className="block text-sm font-medium mb-1">Amount</label><input type="number" value={v1} onChange={e=>setV1(e.target.value)} className="w-full p-3 border rounded-lg" placeholder="1"/></div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-1">From</label>
+                                <select value={currFrom} onChange={e=>setCurrFrom(e.target.value)} className="w-full p-3 border rounded-lg">{currencies.map(c=><option key={c} value={c}>{c}</option>)}</select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium mb-1">To</label>
+                                <select value={currTo} onChange={e=>setCurrTo(e.target.value)} className="w-full p-3 border rounded-lg">{currencies.map(c=><option key={c} value={c}>{c}</option>)}</select>
+                            </div>
+                        </div>
+                    </>
+                )}
             </div>
-            <button onClick={calc} className="w-full py-3 bg-primary text-white rounded font-bold">Calculate</button>
-            {res && <div className="mt-4 p-4 bg-green-50 border-green-200 border rounded text-2xl font-bold text-green-700">{res}</div>}
+            
+            <button onClick={calc} disabled={loading} className="w-full py-3 bg-primary text-white rounded-full font-bold shadow-md hover:bg-primary-dark transition-all">
+                {loading ? 'Calculating...' : 'Calculate'}
+            </button>
+            
+            {res && (
+                <div className="mt-6 p-6 bg-green-50 border border-green-200 rounded-xl animate-fade-in">
+                    <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">Result</p>
+                    <p className="text-2xl font-bold text-green-700">{res}</p>
+                </div>
+            )}
         </div>
     )
 }
@@ -970,7 +1063,7 @@ const App: React.FC = () => {
       if (activeTool.id === 'web-html') return <CodeToHtml />;
       if (['img-conv', 'img-comp', 'img-res', 'img-crop', 'img-rot', 'col-pick'].includes(activeTool.id)) return <ImageTools tool={activeTool} />;
       if (['txt-case', 'txt-count', 'txt-dup', 'txt-sort', 'web-json', 'web-min', 'web-b64', 'web-url'].includes(activeTool.id)) return <TextTools tool={activeTool} />;
-      if (['calc-bmi', 'calc-age', 'calc-emi', 'calc-gst', 'calc-sci'].includes(activeTool.id)) return <CalculatorTools tool={activeTool} />;
+      if (['calc-bmi', 'calc-age', 'calc-emi', 'calc-gst', 'calc-sci', 'calc-curr'].includes(activeTool.id)) return <CalculatorTools tool={activeTool} />;
       if (['util-uuid', 'util-rand', 'col-hex', 'col-grad'].includes(activeTool.id)) return <GeneratorTools tool={activeTool} />;
       if (['doc-p2w', 'doc-w2p', 'doc-mrg', 'doc-lock', 'doc-comp', 'doc-sign'].includes(activeTool.id)) return <DocumentTools tool={activeTool} />;
 
